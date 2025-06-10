@@ -6,7 +6,6 @@
 #include <memory>
 #include <type_traits>
 #include <stdexcept>
-#include <__split_buffer>
 
 #include <tgp/config.h>
 #include <tgp/exception.h>
@@ -297,13 +296,14 @@ public:
         if (end_ == cap_) {
             split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), p - begin_, alloc_);
             sb.construct_at_end(value);
-            swap_with_split_buffer(sb, p);
+            p = swap_with_split_buffer(sb, p);
         } else {
             if (p == end_) {
                 construct_one_at_end(value);
             } else {
-                move_range(p, end_, p + 1);
-                *p = value;
+                split_buffer<value_type, allocator_type&> sb(capacity(), p - begin_, alloc_);
+                sb.construct_at_end(value);
+                p = swap_with_split_buffer(sb, p);
             }
         }
         return p;
@@ -314,7 +314,7 @@ public:
         if (end_ == cap_) {
             split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), p - begin_, alloc_);
             sb.construct_at_end(std::move(value));
-            swap_with_split_buffer(sb, p);
+            p = swap_with_split_buffer(sb, p);
         } else {
             if (p == end_) {
                 construct_one_at_end(std::move(value));
@@ -338,11 +338,12 @@ public:
                 auto n = static_cast<size_type>(end_ - p);
                 if (count > n) {
                     construct_at_end(count - n, value);
-                    count = n;
-                }
-                if (count > 0) {
                     move_range(p, p + n, end_);
-                    std::fill_n(p, count, value);
+                    std::fill_n(p, n, *(p + n));
+                } else {
+                    split_buffer<value_type, allocator_type&> sb(capacity(), p - begin(), alloc_);
+                    sb.construct_at_end(count, value);
+                    p = swap_with_split_buffer(sb, p);
                 }
             }
         }
@@ -416,7 +417,6 @@ public:
         if (end_ == cap_) {
             split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), size(), alloc_);
             sb.emplace_back(std::forward<Args>(args)...);
-            ++sb.end_;
             swap_with_split_buffer(sb);
         } else {
              construct_one_at_end(std::forward<Args>(args)...);
@@ -441,9 +441,13 @@ public:
         if (count <= cur_size) {
             destruct_at_end(begin_ + count);
         } else {
-            if (count > capacity())
-                reserve(recommend_cap(count));
-            construct_at_end(count - cur_size);
+            if (count > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+                sb.construct_at_end(count - cur_size);
+                swap_with_split_buffer(sb);
+            } else {
+                construct_at_end(count - cur_size);
+            }
         }
     }
 
@@ -452,9 +456,13 @@ public:
         if (count <= cur_size) {
             destruct_at_end(begin_ + count);
         } else {
-            if (count > capacity())
-                reserve(recommend_cap(count));
-            construct_at_end(count - cur_size, value);
+            if (count > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+                sb.construct_at_end(count - cur_size, value);
+                swap_with_split_buffer(sb);
+            } else {
+                construct_at_end(count - cur_size, value);
+            }
         }
     }
 
@@ -510,13 +518,13 @@ public:
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 void assign(size_type count, const value_type& value) {
+        const size_type cur_size = size();
+        std::fill_n(begin_, std::min(cur_size, count), value);
         if (count > capacity()) {
-            deallocate_vector();
-            allocate_vector(recommend_cap(count));
-            construct_at_end(count, value);
+            split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+            sb.construct_at_end(count - cur_size, value);
+            swap_with_split_buffer(sb);
         } else {
-            const size_type cur_size = size();
-                std::fill_n(begin_, std::min(cur_size, count), value);
             if (count > cur_size) {
                 construct_at_end(count - cur_size, value);
             } else {
