@@ -6,7 +6,6 @@
 #include <memory>
 #include <type_traits>
 #include <stdexcept>
-#include <__split_buffer>
 
 #include <tgp/config.h>
 #include <tgp/exception.h>
@@ -293,20 +292,7 @@ public:
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, const value_type& value) {
-        pointer p = begin_ + (pos - begin());
-        if (end_ == cap_) {
-            split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), p - begin_, alloc_);
-            sb.construct_at_end(value);
-            swap_with_split_buffer(sb, p);
-        } else {
-            if (p == end_) {
-                construct_one_at_end(value);
-            } else {
-                move_range(p, end_, p + 1);
-                *p = value;
-            }
-        }
-        return p;
+        return insert(pos, 1, value);
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, value_type&& value) {
@@ -314,7 +300,7 @@ public:
         if (end_ == cap_) {
             split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), p - begin_, alloc_);
             sb.construct_at_end(std::move(value));
-            swap_with_split_buffer(sb, p);
+            p = swap_with_split_buffer(sb, p);
         } else {
             if (p == end_) {
                 construct_one_at_end(std::move(value));
@@ -329,20 +315,29 @@ public:
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, size_type count, const value_type& value) {
         pointer p = begin_ + (pos - begin());
         if (count > 0) {
-            const size_type cur_size = size();
-            if (count + cur_size > capacity()) {
-                split_buffer<value_type, allocator_type&> sb(recommend_cap(count + cur_size), p - begin(), alloc_);
+            if (count + size() > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count + size()), p - begin(), alloc_);
                 sb.construct_at_end(count, value);
                 p = swap_with_split_buffer(sb, p);
+            } else if (p == end_) {
+                construct_at_end(count, value);
             } else {
+                const bool is_internal = is_internal_element_ref(pos, value);
                 auto n = static_cast<size_type>(end_ - p);
+                size_type fill_size = std::min(count, n);
                 if (count > n) {
                     construct_at_end(count - n, value);
-                    count = n;
-                }
-                if (count > 0) {
                     move_range(p, p + n, end_);
-                    std::fill_n(p, count, value);
+                } else {
+                    move_range(p, end_, p + count);
+                }
+                if (is_internal) {
+                    value_type& value_after_move = *(std::addressof(value) + count);
+                    for (pointer start = p; start != p + fill_size; ++start)
+                        *start = value_after_move;
+                } else {
+                    for (pointer start = p; start != p + fill_size; ++start)
+                        *start = value;
                 }
             }
         }
@@ -416,7 +411,6 @@ public:
         if (end_ == cap_) {
             split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), size(), alloc_);
             sb.emplace_back(std::forward<Args>(args)...);
-            ++sb.end_;
             swap_with_split_buffer(sb);
         } else {
              construct_one_at_end(std::forward<Args>(args)...);
@@ -441,9 +435,13 @@ public:
         if (count <= cur_size) {
             destruct_at_end(begin_ + count);
         } else {
-            if (count > capacity())
-                reserve(recommend_cap(count));
-            construct_at_end(count - cur_size);
+            if (count > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+                sb.construct_at_end(count - cur_size);
+                swap_with_split_buffer(sb);
+            } else {
+                construct_at_end(count - cur_size);
+            }
         }
     }
 
@@ -452,9 +450,13 @@ public:
         if (count <= cur_size) {
             destruct_at_end(begin_ + count);
         } else {
-            if (count > capacity())
-                reserve(recommend_cap(count));
-            construct_at_end(count - cur_size, value);
+            if (count > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+                sb.construct_at_end(count - cur_size, value);
+                swap_with_split_buffer(sb);
+            } else {
+                construct_at_end(count - cur_size, value);
+            }
         }
     }
 
@@ -510,13 +512,13 @@ public:
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 void assign(size_type count, const value_type& value) {
+        const size_type cur_size = size();
+        std::fill_n(begin_, std::min(cur_size, count), value);
         if (count > capacity()) {
-            deallocate_vector();
-            allocate_vector(recommend_cap(count));
-            construct_at_end(count, value);
+            split_buffer<value_type, allocator_type&> sb(recommend_cap(count), cur_size, alloc_);
+            sb.construct_at_end(count - cur_size, value);
+            swap_with_split_buffer(sb);
         } else {
-            const size_type cur_size = size();
-                std::fill_n(begin_, std::min(cur_size, count), value);
             if (count > cur_size) {
                 construct_at_end(count - cur_size, value);
             } else {
@@ -690,6 +692,11 @@ private:
             alloc_traits::deallocate(alloc_, begin_, capacity());
             begin_ = end_ = cap_ = nullptr;
         }
+    }
+
+    TGP_NODISCARD TGP_CONSTEXPR_SINCE_CXX20 bool is_internal_element_ref(const_iterator begin, const value_type& value) {
+        return std::addressof(value) >= std::__to_address(begin) &&
+               std::addressof(value) < std::__to_address(end_);
     }
     /* end of private function members */
 
