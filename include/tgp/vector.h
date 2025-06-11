@@ -292,21 +292,7 @@ public:
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, const value_type& value) {
-        pointer p = begin_ + (pos - begin());
-        if (end_ == cap_) {
-            split_buffer<value_type, allocator_type&> sb(recommend_cap(size() + 1), p - begin_, alloc_);
-            sb.construct_at_end(value);
-            p = swap_with_split_buffer(sb, p);
-        } else {
-            if (p == end_) {
-                construct_one_at_end(value);
-            } else {
-                split_buffer<value_type, allocator_type&> sb(capacity(), p - begin_, alloc_);
-                sb.construct_at_end(value);
-                p = swap_with_split_buffer(sb, p);
-            }
-        }
-        return p;
+        return insert(pos, 1, value);
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, value_type&& value) {
@@ -329,21 +315,29 @@ public:
     TGP_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator pos, size_type count, const value_type& value) {
         pointer p = begin_ + (pos - begin());
         if (count > 0) {
-            const size_type cur_size = size();
-            if (count + cur_size > capacity()) {
-                split_buffer<value_type, allocator_type&> sb(recommend_cap(count + cur_size), p - begin(), alloc_);
+            if (count + size() > capacity()) {
+                split_buffer<value_type, allocator_type&> sb(recommend_cap(count + size()), p - begin(), alloc_);
                 sb.construct_at_end(count, value);
                 p = swap_with_split_buffer(sb, p);
+            } else if (p == end_) {
+                construct_at_end(count, value);
             } else {
+                const bool is_internal = is_internal_element_ref(pos, value);
                 auto n = static_cast<size_type>(end_ - p);
+                size_type fill_size = std::min(count, n);
                 if (count > n) {
                     construct_at_end(count - n, value);
                     move_range(p, p + n, end_);
-                    std::fill_n(p, n, *(p + n));
                 } else {
-                    split_buffer<value_type, allocator_type&> sb(capacity(), p - begin(), alloc_);
-                    sb.construct_at_end(count, value);
-                    p = swap_with_split_buffer(sb, p);
+                    move_range(p, end_, p + count);
+                }
+                if (is_internal) {
+                    value_type& value_after_move = *(std::addressof(value) + count);
+                    for (pointer start = p; start != p + fill_size; ++start)
+                        *start = value_after_move;
+                } else {
+                    for (pointer start = p; start != p + fill_size; ++start)
+                        *start = value;
                 }
             }
         }
@@ -698,6 +692,11 @@ private:
             alloc_traits::deallocate(alloc_, begin_, capacity());
             begin_ = end_ = cap_ = nullptr;
         }
+    }
+
+    TGP_NODISCARD TGP_CONSTEXPR_SINCE_CXX20 bool is_internal_element_ref(const_iterator begin, const value_type& value) {
+        return std::addressof(value) >= std::__to_address(begin) &&
+               std::addressof(value) < std::__to_address(end_);
     }
     /* end of private function members */
 

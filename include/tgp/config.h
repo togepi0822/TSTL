@@ -40,7 +40,7 @@
 #ifdef __cpp_rtti
 #   define TGP_HAS_RTTI
 #endif
-/* end of predefined macros */
+/* end of compiler's predefined macros */
 
 
 /* begin of compatibility */
@@ -116,7 +116,7 @@
 #define TGP_PRECONDITION(cond)  assert(cond)
 #define TGP_POSTCONDITION(cond) assert(cond)
 
-// helper alias for type_traits
+// helper alias and variables for type_traits
 NAMESPACE_TGP_BEGIN
 
 template<class...>
@@ -126,7 +126,7 @@ template<bool B>
 using bool_constant = std::integral_constant<bool, B>;
 
 template<bool B, class T, class U>
-using condition_t = typename std::conditional<B, T, U>::type;
+using conditional_t = typename std::conditional<B, T, U>::type;
 
 template<bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
