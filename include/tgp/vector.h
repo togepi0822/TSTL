@@ -322,7 +322,6 @@ public:
             } else if (p == end_) {
                 construct_at_end(count, value);
             } else {
-                const bool is_internal = is_internal_element_ref(pos, value);
                 auto n = static_cast<size_type>(end_ - p);
                 size_type fill_size = std::min(count, n);
                 if (count > n) {
@@ -331,8 +330,8 @@ public:
                 } else {
                     move_range(p, end_, p + count);
                 }
-                if (is_internal) {
-                    value_type& value_after_move = *(std::addressof(value) + count);
+                if (is_internal_element_ref(pos, value)) {
+                    const value_type& value_after_move = *(std::addressof(value) + count);
                     for (pointer start = p; start != p + fill_size; ++start)
                         *start = value_after_move;
                 } else {
@@ -627,10 +626,9 @@ private:
         std::__uninitialized_allocator_relocate(
             alloc_, std::__to_address(begin_), std::__to_address(end_), std::__to_address(sb.first_));
         end_ = begin_;
-        alloc_traits::deallocate(alloc_, begin_, capacity());
-        begin_ = sb.first_;
-        end_ = sb.end_;
-        cap_ = sb.cap_;
+        std::swap(begin_, sb.begin_);
+        std::swap(end_, sb.end_);
+        std::swap(cap_, sb.cap_);
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 pointer swap_with_split_buffer(split_buffer<value_type, allocator_type&>& sb, pointer p) {
@@ -639,14 +637,15 @@ private:
             alloc_, std::__to_address(p), std::__to_address(end_), std::__to_address(sb.end_));
         sb.end_ += (end_ - p);
         end_ = p;
+
         std::__uninitialized_allocator_relocate(
             alloc_, std::__to_address(begin_), std::__to_address(p), std::__to_address(sb.first_));
         sb.begin_ -= (p - begin_);
         end_ = begin_;
-        alloc_traits::deallocate(alloc_, begin_, capacity());
-        begin_ = sb.first_;
-        end_ = sb.end_;
-        cap_ = sb.cap_;
+
+        std::swap(begin_, sb.begin_);
+        std::swap(end_, sb.end_);
+        std::swap(cap_, sb.cap_);
         return ret;
     }
 
