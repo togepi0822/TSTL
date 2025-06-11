@@ -56,9 +56,9 @@ struct split_buffer {
     }
 
     TGP_CONSTEXPR_SINCE_CXX20 ~split_buffer() {
-        if (first_) {
+        if (begin_) {
             clear();
-            alloc_traits::deallocate(alloc_, first_, capacity());
+            alloc_traits::deallocate(alloc_, begin_, capacity());
         }
     }
 
